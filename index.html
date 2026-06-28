@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>EduTrack — Faculty of Engineering</title>
+<title>EduTrack — META@UPSI</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
@@ -4650,11 +4650,14 @@ function updateSaveIndicator(success,errMsg){
 // Debounced auto-save: many UI actions call this so saves don't pile up
 // if several changes happen in quick succession.
 let _saveDebounceTimer=null;
+let _saveIsPending=false; // explicit flag — setTimeout IDs stay truthy after firing, so we can't rely on the timer variable alone to know if a save is still pending
 function autoSave(){
+  _saveIsPending=true;
   clearTimeout(_saveDebounceTimer);
   _saveDebounceTimer=setTimeout(()=>{
     saveAppState();      // instant local backup (always works, even offline)
     cloudSaveDebounced(); // shared sync to Google Sheets (if connected)
+    _saveIsPending=false;
   },400);
 }
 
@@ -4706,12 +4709,17 @@ function clearCloudUrl(){
 
 let _cloudSyncInFlight=false;
 let _cloudSaveDebounceTimer=null;
+let _cloudSaveIsPending=false;
 let _lastCloudSyncAt=null;
 let _lastCloudSyncError=null;
 
 function cloudSaveDebounced(){
+  _cloudSaveIsPending=true;
   clearTimeout(_cloudSaveDebounceTimer);
-  _cloudSaveDebounceTimer=setTimeout(cloudSave,600);
+  _cloudSaveDebounceTimer=setTimeout(()=>{
+    _cloudSaveIsPending=false;
+    cloudSave();
+  },600);
 }
 
 async function cloudSave(){
@@ -4905,7 +4913,7 @@ if(getCloudUrl()){
   cloudLoad(false);
   // Keep pulling periodically so the lecturer sees new student submissions
   // without needing to manually refresh.
-  setInterval(()=>{ if(!_cloudSyncInFlight) cloudLoad(false); },20000);
+  setInterval(()=>{ if(!_cloudSyncInFlight&&!_cloudSaveIsPending&&!_saveIsPending) cloudLoad(false); },20000);
 }
 
 // Safety nets: save on tab close and on a periodic interval, in case some
@@ -5319,6 +5327,8 @@ function saveQuiz(){
   toast('Quiz "'+ title +'" saved! ('+totalMarks+' total marks)');
   clearBuilder();
   showQuizTab('qquizlist', document.querySelector('#quiz-subnav .seg-btn:nth-child(3)'));
+  saveAppState();
+  cloudSave(); // sync immediately (not debounced) since quiz schedule timing matters
 }
 
 function editQuiz(quizId){
@@ -5344,6 +5354,7 @@ function deleteQuiz(quizId){
   toast('Assessment deleted: '+q.title);
   renderQBDashboard();
   renderQuizList('');
+  autoSave();
 }
 
 function deleteQuizSubmission(subId){
@@ -5354,6 +5365,7 @@ function deleteQuizSubmission(subId){
   toast('Submission deleted: '+st.name.split(' ')[0]);
   renderQuizSubmissions();
   renderQBDashboard();
+  autoSave();
 }
 
 // ── AI PDF EXTRACTION ────────────────────────────────────
