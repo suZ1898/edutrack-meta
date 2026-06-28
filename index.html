@@ -498,6 +498,10 @@
           <div class="text-xs" id="cloud-file-protocol-warning" style="display:none;margin-top:8px;color:var(--red);background:var(--red-bg);border:0.5px solid var(--red-light);border-radius:6px;padding:8px 10px;line-height:1.5">
             ⚠️ <strong>You're opening EduTrack as a local file</strong> (the address bar shows <span style="font-family:var(--mono)">file://...</span>). Browsers often block this kind of file from reaching outside servers like Google Sheets, even with a correct URL — this is the most common cause of "Failed to fetch" errors. <strong>Fix:</strong> host this file online instead (e.g. upload it to GitHub Pages, which is free) and open it via that https:// link instead of double-clicking the downloaded file.
           </div>
+          <div style="margin-top:10px;padding-top:10px;border-top:0.5px solid var(--blue-light);display:flex;align-items:center;justify-content:space-between">
+            <span class="text-xs" style="color:var(--text2)">If shared data ever gets corrupted (e.g. a quiz overwritten by mistake), reset everything back to this file's built-in defaults.</span>
+            <button class="btn-sm danger" style="font-size:11px;padding:4px 10px;white-space:nowrap;margin-left:10px" onclick="confirmFullReset()">⚠ Reset Everything</button>
+          </div>
         </div>
 
         <!-- Profile card -->
@@ -563,7 +567,7 @@
         <!-- SUB-NAV -->
         <div class="seg" id="quiz-subnav">
           <button class="seg-btn active" onclick="showQuizTab('qdashboard',this)">Dashboard</button>
-          <button class="seg-btn" onclick="showQuizTab('qbuilder',this)">+ Create Quiz</button>
+          <button class="seg-btn" onclick="clearBuilder();showQuizTab('qbuilder',this)">+ Create Quiz</button>
           <button class="seg-btn" onclick="showQuizTab('qquizlist',this)">All Quizzes</button>
           <button class="seg-btn" onclick="showQuizTab('qsubmissions',this)">Submissions</button>
           <button class="seg-btn" onclick="showQuizTab('qanalytics',this)">Analytics</button>
@@ -577,6 +581,12 @@
 
         <!-- QUIZ BUILDER -->
         <div id="qtab-qbuilder" class="qtab" style="display:none">
+          <div id="qb-editing-banner" style="display:none;background:var(--blue-bg);border:0.5px solid var(--blue-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:1rem">
+            <div class="flex-between">
+              <span style="font-size:13px;color:var(--blue)">✏️ <strong>Editing existing quiz:</strong> <span id="qb-editing-title"></span></span>
+              <button class="btn-sm" style="font-size:11px;padding:4px 10px" onclick="clearBuilder()">Discard &amp; Start New</button>
+            </div>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem">
             <div class="field"><label>Quiz Title</label><input type="text" id="qb-title" placeholder="e.g. Quiz 1 — BJT Biasing"/></div>
             <div class="field"><label>Subject</label>
@@ -4604,9 +4614,29 @@ function loadAppState(){
   }
 }
 
-function clearSavedAppState(){
+async function clearSavedAppState(alsoWipeCloud){
   localStorage.removeItem(EDUTRACK_STORAGE_KEY);
-  toast('Saved data cleared. Reload the page to start fresh from built-in defaults.');
+  if(alsoWipeCloud&&getCloudUrl()){
+    try{
+      const res=await fetch(getCloudUrl(),{
+        method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},
+        body:JSON.stringify({data:{}}), // empty object — next load() on any device falls back to this file's built-in defaults
+        redirect:'follow',
+        cache:'no-store'
+      });
+      const json=await res.json();
+      if(json.success){
+        toast('✓ Reset complete. Shared storage and local data cleared — reload the page to see fresh defaults.');
+      } else {
+        toast('Local data cleared, but could not reset shared storage: '+(json.error||'unknown error'));
+      }
+    }catch(err){
+      toast('Local data cleared, but could not reach shared storage to reset it: '+err.message);
+    }
+  } else {
+    toast('Saved data cleared. Reload the page to start fresh from built-in defaults.');
+  }
 }
 
 let _pendingClearConfirm=false;
@@ -4618,8 +4648,22 @@ function confirmClearSavedData(){
     return;
   }
   _pendingClearConfirm=false;
-  clearSavedAppState();
+  clearSavedAppState(false); // local-only clear, kept for backward compatibility with the existing button
   updateStorageStatusText();
+}
+
+let _pendingFullResetConfirm=false;
+function confirmFullReset(){
+  if(!_pendingFullResetConfirm){
+    _pendingFullResetConfirm=true;
+    toast('⚠⚠ Click again to confirm — this wipes EVERYTHING including shared storage for ALL students. Cannot be undone.');
+    setTimeout(()=>{_pendingFullResetConfirm=false;},5000);
+    return;
+  }
+  _pendingFullResetConfirm=false;
+  clearSavedAppState(true); // also wipes the cloud-shared sheet
+  updateStorageStatusText();
+  updateCloudStatusUI();
 }
 
 function updateStorageStatusText(){
@@ -5260,6 +5304,8 @@ function clearBuilder(){
   const d=document.getElementById('qb-duration');if(d)d.value=30;
   const oa=document.getElementById('qb-opens-at');if(oa)oa.value='';
   const ca=document.getElementById('qb-closes-at');if(ca)ca.value='';
+  const banner=document.getElementById('qb-editing-banner');
+  if(banner)banner.style.display='none';
 }
 
 function addQuestion(type){
@@ -5346,9 +5392,23 @@ function saveQuiz(){
   if(opensAt&&closesAt&&new Date(closesAt)<=new Date(opensAt)){
     toast('Closing time must be after the opening time');return;
   }
+  const subject=document.getElementById('qb-subject').value;
+
+  // Safety check: if editingQuizId is set but no longer matches an existing
+  // quiz, or the form's title/subject look like a brand-new quiz rather than
+  // the one being edited, don't risk silently overwriting the wrong quiz.
+  let targetId=editingQuizId;
+  if(targetId){
+    const existingQuiz=getQuiz(targetId);
+    if(!existingQuiz){
+      // Stale ID pointing to a quiz that no longer exists — treat as new.
+      targetId=null;
+    }
+  }
+
   const quiz={
-    id:editingQuizId||('q'+(Date.now())),
-    subject:document.getElementById('qb-subject').value,
+    id:targetId||('q'+(Date.now())),
+    subject,
     title,
     totalMarks,
     duration:parseInt(document.getElementById('qb-duration').value)||30,
@@ -5358,8 +5418,8 @@ function saveQuiz(){
     createdAt:new Date().toISOString().split('T')[0],
     questions:[...builderQuestions]
   };
-  if(editingQuizId){
-    const idx=QDB.quizzes.findIndex(q=>q.id===editingQuizId);
+  if(targetId){
+    const idx=QDB.quizzes.findIndex(q=>q.id===targetId);
     if(idx>-1)QDB.quizzes[idx]=quiz;
   } else {
     QDB.quizzes.push(quiz);
@@ -5378,6 +5438,10 @@ function editQuiz(quizId){
   const qbTitle=document.getElementById('qb-title');if(qbTitle)qbTitle.value=q.title;
   const qbSubj=document.getElementById('qb-subject');if(qbSubj)qbSubj.value=q.subject;
   const qbMarks=document.getElementById('qb-marks');if(qbMarks)qbMarks.value=q.totalMarks;
+  const banner=document.getElementById('qb-editing-banner');
+  const bannerTitle=document.getElementById('qb-editing-title');
+  if(banner)banner.style.display='block';
+  if(bannerTitle)bannerTitle.textContent=q.subject+' — '+q.title;
   const qbDur=document.getElementById('qb-duration');if(qbDur)qbDur.value=q.duration;
   const qbOpens=document.getElementById('qb-opens-at');if(qbOpens)qbOpens.value=q.opensAt||'';
   const qbCloses=document.getElementById('qb-closes-at');if(qbCloses)qbCloses.value=q.closesAt||'';
