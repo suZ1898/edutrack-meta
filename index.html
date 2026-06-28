@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <title>EduTrack — META@UPSI</title>
+<meta property="og:title" content="EduTrack — META@UPSI">
+<meta property="og:description" content="Academic management platform for DCE3043 and DCE3013 — META@UPSI">
+<meta property="og:type" content="website">
+<meta name="description" content="EduTrack — Academic management platform, META@UPSI">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
@@ -3926,6 +3930,11 @@ function changePassword(){
   setVal('cp-confirm','');
   okEl.style.display='block';
   toast('Password changed successfully');
+  // Save and sync immediately — don't wait for the delayed modal close, since
+  // a periodic cloud pull could otherwise overwrite this change with the old
+  // password before it's had a chance to be pushed to shared storage.
+  saveAppState();
+  cloudSave();
   setTimeout(()=>closeModal('modal-change-password'),1500);
 }
 
@@ -5686,11 +5695,37 @@ function viewStudentResult(quizId){
   const q=getQuiz(quizId);
   const sub=QDB.submissions.find(s=>s.quizId===quizId&&s.matric===DB.currentStudent);
   if(!sub){toast('No submission found');return;}
+
+  const avail=getQuizAvailability(q);
+  const canSeeAnswers=avail.state==='closed'||avail.state==='always-open';
+  // 'always-open' quizzes (no schedule set) reveal immediately, matching the
+  // previous behaviour for quizzes that don't use the scheduling feature.
+  // Scheduled quizzes only reveal correct answers/explanations once truly closed,
+  // so students who finish early can't share answers with classmates still taking it.
+
   let html=`<div style="padding:1.75rem">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem">
       <button class="btn-sm" onclick="showPanel('student','s-quizzes',document.getElementById('snav-quizzes'))">← Back</button>
       <div><h2 style="font-size:18px;font-weight:600">${q.title} — Result</h2></div>
     </div>`;
+
+  if(!canSeeAnswers){
+    const mcqTotal=q.questions.filter(x=>x.type==='mcq').reduce((a,x)=>a+x.marks,0);
+    const strTotal=q.questions.filter(x=>x.type==='structure').reduce((a,x)=>a+x.marks,0);
+    html+=`<div style="background:var(--amber-bg);border:0.5px solid var(--amber-light);border-radius:var(--radius-lg);padding:1.5rem;text-align:center;margin-bottom:1rem">
+      <div style="font-size:32px;margin-bottom:10px">🔒</div>
+      <p style="font-weight:600;color:var(--amber);margin-bottom:6px">Detailed answers will be available after the quiz closes</p>
+      <p class="text-sm" style="color:var(--text2)">This quiz closes on <strong>${formatQuizDateTime(avail.closesAt)}</strong>. Correct answers and explanations are hidden until then so students still taking the quiz aren't given an advantage.</p>
+    </div>
+    <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;text-align:left">
+      <div class="flex-between" style="padding:6px 0;border-bottom:0.5px solid var(--border)"><span class="text-sm">MCQ Score (auto-graded)</span><strong>${sub.autoScore}/${mcqTotal}</strong></div>
+      ${strTotal>0?`<div class="flex-between" style="padding:6px 0"><span class="text-sm">Structure Questions</span><span style="font-size:12px;color:${sub.graded?'var(--green)':'var(--amber)'}">${sub.graded?'Graded':strTotal+' marks — awaiting lecturer review'}</span></div>`:''}
+    </div></div>`;
+    document.getElementById('quiz-attempt-content').innerHTML=html;
+    showQuizAttemptPanel();
+    return;
+  }
+
   q.questions.forEach((qs,i)=>{
     const ans=sub.answers[qs.id];
     if(qs.type==='mcq'){
