@@ -657,6 +657,7 @@
             <div class="flex gap8">
               <button class="btn-sm" onclick="addQuestion('mcq')">+ MCQ</button>
               <button class="btn-sm" onclick="addQuestion('structure')">+ Structure</button>
+              <button class="btn-sm purple" onclick="openBulkImport()">📋 Bulk Import</button>
             </div>
           </div>
           <div id="question-list"></div>
@@ -1422,6 +1423,73 @@
   <div class="modal" style="max-width:700px">
     <div class="modal-header"><h3 id="detail-quiz-title">Quiz Detail</h3><button class="modal-close" onclick="closeModal('modal-quiz-detail')">✕</button></div>
     <div id="detail-content"></div>
+  </div>
+</div>
+
+<!-- BULK IMPORT MODAL -->
+<div class="modal-overlay" id="modal-bulk-import">
+  <div class="modal" style="max-width:720px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h3>📋 Bulk Import Questions</h3>
+      <button class="modal-close" onclick="closeModal('modal-bulk-import')">✕</button>
+    </div>
+    <div style="padding:1rem 1.25rem;overflow-y:auto;flex:1">
+      <!-- Format guide -->
+      <div style="background:var(--blue-bg);border:0.5px solid var(--blue-light);border-radius:var(--radius);padding:0.875rem;margin-bottom:1rem;font-size:12px;color:var(--text2)">
+        <strong style="font-size:12px;color:var(--blue);display:block;margin-bottom:6px">📖 Format Guide</strong>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <div style="font-weight:600;margin-bottom:4px;color:var(--text)">MCQ Question:</div>
+            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">MCQ [marks]
+Question text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: B
+EXPLAIN: Why B is correct</pre>
+          </div>
+          <div>
+            <div style="font-weight:600;margin-bottom:4px;color:var(--text)">Structure Question:</div>
+            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">STRUCTURE [marks]
+Question text here
+(a) sub-part a [2]
+(b) sub-part b [3]
+ANSWER:
+Model answer / marking
+scheme goes here</pre>
+          </div>
+        </div>
+        <div style="margin-top:8px;color:var(--text3);font-size:11px">Separate questions with a blank line. Lines starting with <code style="background:var(--bg2);padding:1px 4px;border-radius:3px">#</code> are ignored (comments).</div>
+      </div>
+      <!-- Template buttons -->
+      <div style="margin-bottom:0.75rem;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:12px;color:var(--text2);font-weight:500">Load template:</span>
+        <button class="btn-sm" onclick="loadBulkTemplate('dce3053-midterm')">DCE3053 Mid-Term Test</button>
+        <button class="btn-sm" onclick="loadBulkTemplate('blank-mcq5')">5 Blank MCQs</button>
+        <button class="btn-sm" onclick="loadBulkTemplate('blank-mix')">Mix (3 MCQ + 1 Structure)</button>
+      </div>
+      <!-- Paste area -->
+      <div class="field" style="margin-bottom:0.75rem">
+        <label style="font-size:12px">Paste / type all your questions below</label>
+        <textarea id="bulk-import-text" rows="18" style="font-size:12px;font-family:var(--mono);padding:10px;border:0.5px solid var(--border);border-radius:var(--radius);width:100%;resize:vertical;background:var(--bg2);color:var(--text);outline:none;line-height:1.6" placeholder="Paste your questions here using the format shown above..."></textarea>
+      </div>
+      <!-- Options row -->
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="bulk-append" checked style="cursor:pointer"/>
+          Append to existing questions (uncheck to replace all)
+        </label>
+        <div id="bulk-parse-preview" style="font-size:12px;color:var(--text3)"></div>
+      </div>
+      <!-- Parse result -->
+      <div id="bulk-import-result" style="display:none;padding:0.75rem;border-radius:var(--radius);font-size:12px;margin-bottom:0.5rem"></div>
+    </div>
+    <div class="modal-footer" style="border-top:0.5px solid var(--border);padding:0.75rem 1.25rem;display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-sm" onclick="closeModal('modal-bulk-import')">Cancel</button>
+      <button class="btn-sm" onclick="previewBulkImport()">Preview Parse</button>
+      <button class="btn-sm primary" onclick="executeBulkImport()">Import Questions</button>
+    </div>
   </div>
 </div>
 
@@ -5837,6 +5905,301 @@ function addQuestion(type){
   }
   renderBuilder();
 }
+
+// ── BULK IMPORT ──────────────────────────────────────────────────────────────
+function openBulkImport(){
+  document.getElementById('bulk-import-result').style.display='none';
+  document.getElementById('bulk-parse-preview').textContent='';
+  openModal('modal-bulk-import');
+}
+
+const BULK_TEMPLATES={
+  'dce3053-midterm':`# DCE3053 Electrical Circuit Theorem — Mid-Term Test
+# Section A: MCQ (7 questions × 1 mark)
+
+MCQ 1
+What happens to the total resistance when more resistors are added in parallel to a circuit?
+A) Increases
+B) Remains the same
+C) Becomes zero
+D) Decreases
+ANSWER: D
+EXPLAIN: Adding more parallel paths reduces total resistance (1/RT = 1/R1 + 1/R2 + ...)
+
+MCQ 1
+Figure A1 — In a parallel circuit, IT = 6 A and I1 = 4 A through R1. R2 and R3 are equal (10 Ω each) and connected in parallel. Find I2.
+A) 4 A
+B) 2 A
+C) 6 A
+D) 1 A
+ANSWER: B
+EXPLAIN: I2 = IT − I1 = 6 − 4 = 2 A. Since R2 = R3, the remaining 2 A splits equally.
+
+MCQ 1
+Figure A2 — R1 = 12 Ω and R2 = 24 Ω are connected in parallel, then in series with R3 = 20 Ω. Source = 112 V. Find RT.
+A) 36 Ω
+B) 28 Ω
+C) 56 Ω
+D) 20 Ω
+ANSWER: B
+EXPLAIN: 12 ∥ 24 = 8 Ω; RT = 8 + 20 = 28 Ω
+
+MCQ 1
+To find the Thevenin resistance (RTH), voltage sources in the circuit are replaced with:
+A) Open circuits
+B) Current sources
+C) Short circuits
+D) Resistors
+ANSWER: C
+EXPLAIN: Voltage sources are deactivated (replaced with short circuits) when finding RTH.
+
+MCQ 1
+Figure A3 — VS = 20 V, with 10 Ω in series, 20 Ω ∥ 20 Ω ∥ 30 Ω connected to RL = 10 Ω. Find RTH seen by RL.
+A) 3.75 Ω
+B) 10 ∥ 20 ∥ 20 ∥ 30 = 4.29 Ω
+C) 10 Ω
+D) 20 Ω
+ANSWER: B
+EXPLAIN: Short VS → RTH = 10 ∥ 20 ∥ 20 ∥ 30 = 4.29 Ω
+
+MCQ 1
+In applying the Superposition Theorem, current sources are replaced with:
+A) Open circuits
+B) Short circuits
+C) Voltage sources
+D) Resistors
+ANSWER: A
+EXPLAIN: Current sources are deactivated by replacing them with open circuits.
+
+MCQ 1
+According to the Superposition Theorem, the total response in a circuit is:
+A) The product of individual responses
+B) The largest individual response
+C) The algebraic sum of individual responses
+D) The average of individual responses
+ANSWER: C
+EXPLAIN: Superposition states that total response = algebraic sum of responses due to each source acting alone.
+
+# Section B: Structured Questions
+
+STRUCTURE 5
+Figure B1 — A circuit contains a 24 V source, R1 = 6 Ω (series with source), R2 = 12 Ω (parallel with terminals a–b), and R3 = 4 Ω (series between R2 and terminals a–b). RL is connected between terminals a–b.
+(a) Find the Thevenin equivalent circuit (VTH and RTH) seen from terminals a–b, and draw the equivalent circuit. [3 marks]
+(b) Calculate the maximum power that can be transferred to RL. [2 marks]
+ANSWER:
+(a) RTH: Short the 24 V source → (R1 ∥ R2) + R3 = (6 ∥ 12) + 4 = 4 + 4 = 8 Ω [1 mark]
+    VTH: Open-circuit voltage at a–b = voltage across R2 (no current through R3 when RL open)
+         VTH = 24 × R2/(R1+R2) = 24 × 12/18 = 16 V [1 mark]
+    Draw: 16 V source in series with 8 Ω, connected to RL at terminals a–b [1 mark]
+(b) Max power transfer when RL = RTH = 8 Ω [1 mark]
+    Pmax = VTH² / (4 × RTH) = 16² / (4 × 8) = 256/32 = 8 W [1 mark]
+
+STRUCTURE 8
+Figure B2 — A series RC circuit: E = 12 V DC source, R = 10 kΩ, C = 220 μF. Switch closes at t = 0. Capacitor initially uncharged.
+(a) Calculate the time constant τ and the time for the capacitor to reach full charge. [2 marks]
+(b) At t = 4.4 s, find: VC (voltage across capacitor), VR (voltage across resistor), and I (current). [3 marks]
+(c) Calculate the time for VC to reach 9 V. [2 marks]
+(d) Describe the behaviour of the capacitor at the instant the switch closes and when it is fully charged. [1 mark]
+ANSWER:
+(a) τ = RC = (10 × 10³)(220 × 10⁻⁶) = 2.2 s [1 mark]
+    Full charge time = 5τ = 5 × 2.2 = 11 s [1 mark]
+(b) t/τ = 4.4/2.2 = 2; e⁻² = 0.1353
+    VC = E(1 − e^(−t/τ)) = 12(1 − 0.1353) = 10.38 V [1 mark]
+    VR = E × e^(−t/τ) = 12 × 0.1353 = 1.62 V [1 mark]
+    I = (E/R) × e^(−t/τ) = (12/10000) × 0.1353 = 1.62 mA [1 mark]
+(c) t = −RC × ln(1 − VC/E) = −2.2 × ln(1 − 9/12) = −2.2 × ln(0.25)
+    t = −2.2 × (−1.386) = 3.05 s [2 marks]
+(d) At switch close: capacitor acts as short circuit (zero voltage, maximum current)
+    At full charge: capacitor acts as open circuit (no current flows) [1 mark]`,
+
+  'blank-mcq5':`MCQ 2
+Question 1 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: A
+EXPLAIN: Explanation here
+
+MCQ 2
+Question 2 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: B
+EXPLAIN: Explanation here
+
+MCQ 2
+Question 3 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: C
+EXPLAIN: Explanation here
+
+MCQ 2
+Question 4 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: A
+EXPLAIN: Explanation here
+
+MCQ 2
+Question 5 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: D
+EXPLAIN: Explanation here`,
+
+  'blank-mix':`MCQ 2
+MCQ question 1 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: A
+EXPLAIN: Explanation here
+
+MCQ 2
+MCQ question 2 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: B
+EXPLAIN: Explanation here
+
+MCQ 2
+MCQ question 3 text here
+A) Option A
+B) Option B
+C) Option C
+D) Option D
+ANSWER: C
+EXPLAIN: Explanation here
+
+STRUCTURE 5
+Structure question text here.
+(a) Sub-part a [2 marks]
+(b) Sub-part b [3 marks]
+ANSWER:
+(a) Model answer for sub-part a
+(b) Model answer for sub-part b`
+};
+
+function loadBulkTemplate(key){
+  document.getElementById('bulk-import-text').value=BULK_TEMPLATES[key]||'';
+  previewBulkImport();
+}
+
+function parseBulkImportText(raw){
+  const questions=[];
+  const errors=[];
+  // Split into blocks by blank lines
+  const blocks=raw.split(/\n{2,}/).map(b=>b.trim()).filter(b=>b&&!b.startsWith('#'));
+  blocks.forEach((block,bi)=>{
+    const lines=block.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+    if(!lines.length)return;
+    const firstLine=lines[0].toUpperCase();
+    // Detect type
+    if(firstLine.startsWith('MCQ')){
+      // Parse MCQ
+      const marksMatch=lines[0].match(/MCQ\s+(\d+)/i);
+      const marks=marksMatch?parseInt(marksMatch[1]):2;
+      // Question text: lines after first line, before option lines
+      const optionStart=lines.findIndex(l=>/^[A-D]\)/i.test(l));
+      if(optionStart<0){errors.push('Block '+(bi+1)+': MCQ has no options (A) B) C) D)');return;}
+      const questionText=lines.slice(1,optionStart).join('\n').trim();
+      if(!questionText){errors.push('Block '+(bi+1)+': MCQ has no question text');return;}
+      // Options
+      const opts=['','','',''];
+      const optLetters=['A','B','C','D'];
+      let answerLine='',explainLine='';
+      let inExplain=false;
+      const explainParts=[];
+      for(let i=optionStart;i<lines.length;i++){
+        const l=lines[i];
+        if(/^ANSWER:/i.test(l)){answerLine=l.replace(/^ANSWER:\s*/i,'').trim();inExplain=false;}
+        else if(/^EXPLAIN:/i.test(l)||/^EXPLANATION:/i.test(l)){
+          explainParts.push(l.replace(/^EXPLAN[A-Z]*:\s*/i,'').trim());inExplain=true;
+        } else if(inExplain){explainParts.push(l);}
+        else {
+          const optMatch=l.match(/^([A-D])\)\s*(.*)/i);
+          if(optMatch){
+            const idx=optLetters.indexOf(optMatch[1].toUpperCase());
+            if(idx>=0)opts[idx]=optMatch[2].trim();
+          }
+        }
+      }
+      explainLine=explainParts.join(' ').trim();
+      const correctIdx=optLetters.indexOf((answerLine||'').toUpperCase().trim());
+      if(correctIdx<0){errors.push('Block '+(bi+1)+': MCQ missing or invalid ANSWER: (must be A/B/C/D)');return;}
+      questions.push({id:'qq'+Date.now()+Math.random().toString(36).slice(2,6),type:'mcq',text:questionText,marks,options:opts,correct:correctIdx,explanation:explainLine});
+    } else if(firstLine.startsWith('STRUCTURE')){
+      // Parse Structure
+      const marksMatch=lines[0].match(/STRUCTURE\s+(\d+)/i);
+      const marks=marksMatch?parseInt(marksMatch[1]):5;
+      // Find ANSWER: line
+      const answerIdx=lines.findIndex(l=>/^ANSWER:/i.test(l));
+      const questionText=(answerIdx>0?lines.slice(1,answerIdx):lines.slice(1)).join('\n').trim();
+      const modelAnswer=(answerIdx>=0?lines.slice(answerIdx+1).join('\n'):'').trim();
+      if(!questionText){errors.push('Block '+(bi+1)+': Structure has no question text');return;}
+      questions.push({id:'qq'+Date.now()+Math.random().toString(36).slice(2,6),type:'structure',text:questionText,marks,modelAnswer});
+    } else {
+      errors.push('Block '+(bi+1)+': Unknown type — first line must start with MCQ or STRUCTURE');
+    }
+  });
+  return{questions,errors};
+}
+
+function previewBulkImport(){
+  const raw=document.getElementById('bulk-import-text').value.trim();
+  const result=document.getElementById('bulk-import-result');
+  const preview=document.getElementById('bulk-parse-preview');
+  if(!raw){result.style.display='none';preview.textContent='';return;}
+  const{questions,errors}=parseBulkImportText(raw);
+  const mcqCount=questions.filter(q=>q.type==='mcq').length;
+  const structCount=questions.filter(q=>q.type==='structure').length;
+  const totalMarks=questions.reduce((s,q)=>s+q.marks,0);
+  preview.textContent=`→ Found: ${questions.length} question${questions.length!==1?'s':''} (${mcqCount} MCQ, ${structCount} Structure) · ${totalMarks} marks total`;
+  if(errors.length){
+    result.style.display='block';
+    result.style.background='var(--red-bg)';result.style.border='0.5px solid #f8c0c0';result.style.color='var(--red)';
+    result.innerHTML='<strong>⚠ Parse warnings:</strong><ul style="margin:4px 0 0 16px;padding:0">'+errors.map(e=>`<li>${e}</li>`).join('')+'</ul>';
+  } else if(questions.length){
+    result.style.display='block';
+    result.style.background='var(--green-bg)';result.style.border='0.5px solid #b4e6b4';result.style.color='var(--green)';
+    result.innerHTML=`<strong>✓ Ready to import</strong> — ${questions.length} question${questions.length!==1?'s':''} parsed successfully. Click "Import Questions" to add them.`;
+  } else {
+    result.style.display='none';
+  }
+}
+
+function executeBulkImport(){
+  const raw=document.getElementById('bulk-import-text').value.trim();
+  if(!raw){toast('Nothing to import');return;}
+  const{questions,errors}=parseBulkImportText(raw);
+  if(!questions.length){toast('No valid questions found — check the format');return;}
+  if(errors.length){
+    if(!confirm('There were '+errors.length+' parse warning(s). Import the '+questions.length+' valid question(s) anyway?'))return;
+  }
+  const append=document.getElementById('bulk-append').checked;
+  if(append){
+    builderQuestions=[...builderQuestions,...questions];
+  } else {
+    builderQuestions=questions;
+  }
+  renderBuilder();
+  closeModal('modal-bulk-import');
+  toast('✓ Imported '+questions.length+' question'+(questions.length!==1?'s':'')+' ('+(append?'appended':'replaced all')+')');
+}
+// ── END BULK IMPORT ──────────────────────────────────────────────────────────
 
 function renderBuilder(){
   document.getElementById('q-count').textContent='('+builderQuestions.length+' question'+(builderQuestions.length!==1?'s':'')+')';
