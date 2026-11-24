@@ -1440,24 +1440,24 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div>
             <div style="font-weight:600;margin-bottom:4px;color:var(--text)">MCQ Question:</div>
-            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">MCQ [marks]
-Question text here
+            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">MCQ 2
+MCQ question 1 text here
 A) Option A
 B) Option B
 C) Option C
 D) Option D
-ANSWER: B
-EXPLAIN: Why B is correct</pre>
+ANSWER: A
+EXPLAIN: Explanation here</pre>
           </div>
           <div>
             <div style="font-weight:600;margin-bottom:4px;color:var(--text)">Structure Question:</div>
-            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">STRUCTURE [marks]
-Question text here
-(a) sub-part a [2]
-(b) sub-part b [3]
+            <pre style="font-size:11px;background:var(--bg2);padding:6px;border-radius:4px;margin:0;white-space:pre-wrap">STRUCTURE 5
+Structure question text here.
+(a) Sub-part a [2 marks]
+(b) Sub-part b [3 marks]
 ANSWER:
-Model answer / marking
-scheme goes here</pre>
+(a) Model answer for sub-part a
+(b) Model answer for sub-part b</pre>
           </div>
         </div>
         <div style="margin-top:8px;color:var(--text3);font-size:11px">Separate questions with a blank line. Lines starting with <code style="background:var(--bg2);padding:1px 4px;border-radius:3px">#</code> are ignored (comments).</div>
@@ -5915,7 +5915,7 @@ function openBulkImport(){
 
 const BULK_TEMPLATES={
   'dce3053-midterm':`# DCE3053 Electrical Circuit Theorem — Mid-Term Test
-# Section A: MCQ (7 questions × 1 mark)
+# Section A: MCQ (7 questions × 1 mark each)
 
 MCQ 1
 What happens to the total resistance when more resistors are added in parallel to a circuit?
@@ -5951,12 +5951,12 @@ B) Current sources
 C) Short circuits
 D) Resistors
 ANSWER: C
-EXPLAIN: Voltage sources are deactivated (replaced with short circuits) when finding RTH.
+EXPLAIN: Voltage sources are deactivated by replacing them with short circuits when finding RTH.
 
 MCQ 1
 Figure A3 — VS = 20 V, with 10 Ω in series, 20 Ω ∥ 20 Ω ∥ 30 Ω connected to RL = 10 Ω. Find RTH seen by RL.
 A) 3.75 Ω
-B) 10 ∥ 20 ∥ 20 ∥ 30 = 4.29 Ω
+B) 4.29 Ω
 C) 10 Ω
 D) 20 Ω
 ANSWER: B
@@ -5978,7 +5978,7 @@ B) The largest individual response
 C) The algebraic sum of individual responses
 D) The average of individual responses
 ANSWER: C
-EXPLAIN: Superposition states that total response = algebraic sum of responses due to each source acting alone.
+EXPLAIN: Total response = algebraic sum of responses due to each independent source acting alone.
 
 # Section B: Structured Questions
 
@@ -6213,6 +6213,32 @@ function renderBuilder(){
   }).join('');
 }
 
+function qImageUploadHtml(q){
+  return`<div style="margin-bottom:8px">
+    <div style="font-size:11px;color:var(--text2);margin-bottom:4px;font-weight:500">📷 Figure / Diagram (optional)</div>
+    ${q.image?`
+      <div style="position:relative;display:inline-block;max-width:100%">
+        <img src="${q.image}" alt="Figure" style="max-width:100%;max-height:220px;border-radius:var(--radius);border:0.5px solid var(--border);display:block"/>
+        <button onclick="removeQImage('${q.id}')" style="position:absolute;top:4px;right:4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;line-height:1;padding:0">✕</button>
+      </div>`
+    :`<label style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px dashed var(--border);border-radius:var(--radius);cursor:pointer;background:var(--bg2);font-size:12px;color:var(--text3);width:fit-content">
+        <input type="file" accept="image/*" style="display:none" onchange="uploadQImage('${q.id}',this)"/>
+        🖼 Upload figure/diagram
+      </label>`}
+  </div>`;
+}
+
+function uploadQImage(id,input){
+  const file=input.files[0];
+  if(!file)return;
+  if(file.size>500000){toast('Image too large — please use under 500 KB');return;}
+  const reader=new FileReader();
+  reader.onload=e=>{updateQField(id,'image',e.target.result);renderBuilder();};
+  reader.readAsDataURL(file);
+}
+
+function removeQImage(id){updateQField(id,'image',null);renderBuilder();}
+
 function renderMCQBlock(q,i){
   return`<div class="qblock" id="qb-${q.id}">
     <div class="qblock-header">
@@ -6225,6 +6251,7 @@ function renderMCQBlock(q,i){
     <div class="field" style="margin-bottom:8px">
       <textarea placeholder="Enter question text..." rows="2" onchange="updateQField('${q.id}','text',this.value)" style="font-size:13px;padding:8px 10px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:var(--font);width:100%;resize:vertical;background:var(--bg2);color:var(--text);outline:none">${q.text}</textarea>
     </div>
+    ${qImageUploadHtml(q)}
     <div style="margin-bottom:8px">
       <div class="text-xs mb4">Options — select the correct answer:</div>
       ${q.options.map((opt,oi)=>`
@@ -6254,6 +6281,7 @@ function renderStructureBlock(q,i){
       <label style="font-size:11px">Question</label>
       <textarea placeholder="Enter structure question..." rows="3" onchange="updateQField('${q.id}','text',this.value)" style="font-size:13px;padding:8px 10px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:var(--font);width:100%;resize:vertical;background:var(--bg2);color:var(--text);outline:none">${q.text}</textarea>
     </div>
+    ${qImageUploadHtml(q)}
     <div class="field" style="margin-bottom:0">
       <label style="font-size:11px">Model Answer / Marking Scheme</label>
       <textarea placeholder="Enter model answer or marking scheme..." rows="3" onchange="updateQField('${q.id}','modelAnswer',this.value)" style="font-size:12px;padding:8px 10px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:var(--font);width:100%;resize:vertical;background:var(--green-bg);color:var(--green);outline:none">${q.modelAnswer}</textarea>
@@ -6476,7 +6504,8 @@ function renderQuizAttempt(q){
   q.questions.forEach((qs,i)=>{
     html+=`<div class="quiz-question-block">
       <div class="quiz-q-num">Question ${i+1} · ${qs.marks} mark${qs.marks!==1?'s':''} · <span style="color:${qs.type==='mcq'?'var(--blue)':'var(--purple)'}">${qs.type==='mcq'?'MCQ':'Structure'}</span></div>
-      <div class="quiz-q-text">${qs.text}</div>`;
+      <div class="quiz-q-text">${qs.text}</div>
+      ${qs.image?`<div style="margin:8px 0 12px"><img src="${qs.image}" alt="Figure" style="max-width:100%;max-height:280px;border-radius:var(--radius);border:0.5px solid var(--border)"/></div>`:''}`;
     if(qs.type==='mcq'){
       html+=qs.options.map((opt,oi)=>`
         <div class="mcq-choice ${studentAnswers[qs.id]===oi?'selected':''}" onclick="selectMCQ('${qs.id}',${oi},this)">
