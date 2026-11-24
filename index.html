@@ -338,6 +338,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
         My Profile
       </div>
+      <div class="nav-item" onclick="showPanel('admin','past-semesters',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
+        Past Semesters
+      </div>
       <div class="sidebar-footer">
         <div class="user-pill" style="cursor:pointer" onclick="showPanel('admin','profile',document.querySelector('.nav-item[onclick*=profile]'))">
           <div class="avatar" style="background:var(--blue-bg);color:var(--blue)" id="admin-avatar">DR</div>
@@ -465,6 +469,23 @@
         <div id="attendance-content"></div>
       </div>
 
+      <!-- PAST SEMESTERS PANEL -->
+      <div class="panel" id="admin-past-semesters">
+        <div class="panel-header">
+          <div><h2>Past Semesters</h2><p>View archived data from previous semesters — read only</p></div>
+        </div>
+        <div id="past-sem-list" style="display:grid;gap:12px"></div>
+        <div id="past-sem-viewer" style="display:none;margin-top:1.5rem">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:1rem">
+            <button class="btn-sm" onclick="closePastSemViewer()">← Back to list</button>
+            <h3 id="past-sem-viewer-title" style="font-size:16px;font-weight:600"></h3>
+            <span class="badge amber" style="margin-left:4px">Read Only</span>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:1rem;flex-wrap:wrap" id="past-sem-tabs"></div>
+          <div id="past-sem-content"></div>
+        </div>
+      </div>
+
       <!-- PROFILE -->
       <div class="panel" id="admin-profile">
         <div class="panel-header">
@@ -535,6 +556,7 @@
           <div style="padding:12px 14px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between">
             <strong style="font-size:13px">Semester Teaching History</strong>
             <button class="btn-sm" onclick="openModal('modal-log-semester')">+ Log Semester</button>
+            <button class="btn-sm primary" onclick="openNewSemesterModal()" style="background:var(--teal);border-color:var(--teal)">🔄 New Semester</button>
           </div>
           <table>
             <thead><tr><th>Semester</th><th>Subjects</th><th>Lecturer</th><th>Notes</th><th></th></tr></thead>
@@ -1233,6 +1255,33 @@
   </div>
 </div>
 
+<!-- NEW SEMESTER MODAL -->
+<div class="modal-overlay" id="modal-new-semester">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><h3>🔄 Start New Semester</h3><button class="modal-close" onclick="closeModal('modal-new-semester')">✕</button></div>
+    <div style="background:var(--amber-bg);border:0.5px solid var(--amber-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:1rem">
+      <p class="text-sm" style="color:var(--amber)" id="new-sem-warning"></p>
+    </div>
+    <div class="field">
+      <label>New Semester Name</label>
+      <input type="text" id="new-sem-name" placeholder="e.g. 2025/2026 Sem 1 (A261)"/>
+    </div>
+    <div class="field">
+      <label>Subjects for New Semester</label>
+      <div id="new-sem-subjects"></div>
+      <button class="btn-sm" onclick="_newSemSubjects.push({code:'',name:''});renderNewSemSubjectList()" style="margin-top:6px">+ Add Subject</button>
+    </div>
+    <div class="field">
+      <label>Note (optional)</label>
+      <input type="text" id="new-sem-note" placeholder="e.g. New cohort, different timetable"/>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1rem">
+      <button class="btn-sm" onclick="closeModal('modal-new-semester')">Cancel</button>
+      <button class="btn-sm primary" onclick="confirmNewSemester()" style="background:var(--teal);border-color:var(--teal)">✓ Archive & Start New Semester</button>
+    </div>
+  </div>
+</div>
+
 <!-- LOG SEMESTER MODAL -->
 <div class="modal-overlay" id="modal-log-semester">
   <div class="modal" style="max-width:500px">
@@ -1406,6 +1455,7 @@ const DB = {
   subjectRegistry: {
     'DCE3043': 'Analogue Electronics',
     'DCE3013': 'Digital Electronics',
+    'DCE3053': 'Electrical Circuit Theorem',
   },
 
   semesterLog: [
@@ -1413,6 +1463,10 @@ const DB = {
     {semester:'2023/2024 Sem 2', subjects:['DCE3013'], lecturerName:'Dr. Rashid', note:''},
     {semester:'2024/2025 Sem 1', subjects:['DCE3043','DCE3013'], lecturerName:'Dr. Rashid', note:'Both subjects assigned this semester.'},
   ],
+
+  // Full semester snapshots — each entry is a complete frozen copy of one past semester
+  // {id, semester, subjects, subjectRegistry, archivedAt, students, assessments, scores, sessions, submissions, QDB}
+  semesterArchives: [],
 
   classLists: {
     'DCE3043': [
@@ -1703,15 +1757,11 @@ function doAdminLogin(){
     DB.currentRole='admin';
     hideAdminLogin();
     showPage('admin');
-    // Pull latest cloud data first so the admin sees all student submissions
-    // immediately on login — don't render from potentially stale in-memory data.
+    // Pull latest cloud data first so admin sees all student submissions immediately
     if(getCloudUrl()){
-      const loadingToast=document.getElementById('toast');
-      if(loadingToast){loadingToast.textContent='⏳ Loading latest data…';loadingToast.classList.add('show');}
-      cloudLoad(false).then(()=>{
-        if(loadingToast)loadingToast.classList.remove('show');
-        renderAdmin();
-      }).catch(()=>renderAdmin()); // fall back to local data if cloud fails
+      const t=document.getElementById('toast');
+      if(t){t.textContent='⏳ Loading latest data…';t.classList.add('show');}
+      cloudLoad(false).then(()=>{if(t)t.classList.remove('show');renderAdmin();}).catch(()=>renderAdmin());
     } else {
       renderAdmin();
     }
@@ -1740,7 +1790,7 @@ function doLogin(){
   DB.currentStudent=st.matric;
   DB.activeSubject=pw;
   showPage('student');
-  // Pull latest cloud data so student sees their most recent scores/quiz results
+  // Pull latest cloud data so student sees most recent scores/quiz results
   if(getCloudUrl()){
     cloudLoad(false).then(()=>renderStudent()).catch(()=>renderStudent());
   } else {
@@ -1820,6 +1870,7 @@ function showPanel(role,panel,el){
       if(panel==='gradebook')renderGradebook(getLecturerSubjects()[0]||'DCE3043');
       if(panel==='attendance'){attCurrentSubject=getLecturerSubjects()[0]||'DCE3043';renderAttendance(attCurrentSubject);}
       if(panel==='profile')renderProfile();
+      if(panel==='past-semesters'){renderPastSemesters();}
       if(panel==='quiz'){
         showQuizTab('qdashboard',document.querySelector('#quiz-subnav .seg-btn'));
         const dueFld=document.getElementById('qb-due');
@@ -3744,6 +3795,310 @@ function clearScore(){
   renderDashboardSummary();
   editScoreAssessId=null;editScoreMatric=null;
 }
+// ══════════════════════════════════════════════════════════════════════════
+// SEMESTER ARCHIVE SYSTEM
+// ══════════════════════════════════════════════════════════════════════════
+
+/** Create a frozen snapshot of the current semester and push to DB.semesterArchives */
+function archiveCurrentSemester(note){
+  if(!DB.semesterArchives)DB.semesterArchives=[];
+  const sem=DB.lecturer.currentSemester;
+  if(!sem)return;
+  // Don't double-archive same semester
+  if(DB.semesterArchives.find(a=>a.semester===sem)){
+    toast('Semester '+sem+' is already archived');
+    return false;
+  }
+  const snapshot={
+    id:'arch_'+Date.now(),
+    semester:sem,
+    archivedAt:new Date().toISOString(),
+    subjects:[...DB.lecturer.subjects],
+    subjectRegistry:JSON.parse(JSON.stringify(DB.subjectRegistry)),
+    note:note||'',
+    // Deep-copy all student/assessment/score data
+    students:JSON.parse(JSON.stringify(DB.students)),
+    assessments:JSON.parse(JSON.stringify(DB.assessments)),
+    scores:JSON.parse(JSON.stringify(DB.scores)),
+    sessions:JSON.parse(JSON.stringify(DB.sessions)),
+    submissions:JSON.parse(JSON.stringify(DB.submissions)),
+    QDB:{
+      quizzes:JSON.parse(JSON.stringify(QDB.quizzes)),
+      submissions:JSON.parse(JSON.stringify(QDB.submissions)),
+      students:JSON.parse(JSON.stringify(QDB.students)),
+    }
+  };
+  DB.semesterArchives.push(snapshot);
+  return snapshot;
+}
+
+/** Switch to a new semester: archive current, clear live data, set new semester+subjects */
+function switchToNewSemester(newSem, newSubjects, newSubjectNames){
+  // 1. Archive current semester first
+  const archived=archiveCurrentSemester('Auto-archived when switching to '+newSem);
+  if(archived===false)return false; // already archived, block
+
+  // 2. Clear live data (keep lecturer info + subjectRegistry + archives + semesterLog)
+  DB.students=[];
+  DB.assessments=[];
+  DB.scores={};
+  DB.sessions=[];
+  DB.submissions=[];
+  DB.proformas=[];
+  QDB.quizzes=[];
+  QDB.submissions=[];
+  QDB.students={};
+
+  // 3. Update semester + subjects
+  DB.lecturer.currentSemester=newSem;
+  DB.lecturer.subjects=newSubjects;
+  newSubjectNames.forEach((name,i)=>{if(name)DB.subjectRegistry[newSubjects[i]]=name;});
+
+  // 4. Log to semesterLog
+  const lecturerName=DB.lecturer.title+' '+DB.lecturer.name;
+  if(!DB.semesterLog.find(l=>l.semester===newSem)){
+    DB.semesterLog.push({semester:newSem,subjects:newSubjects,lecturerName,note:'New semester started'});
+  }
+
+  autoSave();
+  toast('✓ Switched to '+newSem+' — previous semester archived');
+  return true;
+}
+
+/** Render the Past Semesters list panel */
+function renderPastSemesters(){
+  const list=document.getElementById('past-sem-list');
+  const viewer=document.getElementById('past-sem-viewer');
+  if(!list)return;
+  viewer.style.display='none';
+  const archives=(DB.semesterArchives||[]).slice().reverse();
+  if(!archives.length){
+    list.innerHTML=`<div style="text-align:center;color:var(--text3);padding:3rem 1rem">
+      <div style="font-size:2rem;margin-bottom:0.5rem">🗂️</div>
+      <div style="font-size:14px;font-weight:500">No archived semesters yet</div>
+      <div style="font-size:12px;margin-top:4px">When you switch to a new semester, the current one is automatically archived here.</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML=archives.map(a=>{
+    const studentCount=a.students?a.students.length:0;
+    const assessCount=a.assessments?a.assessments.length:0;
+    const quizCount=a.QDB&&a.QDB.quizzes?a.QDB.quizzes.length:0;
+    const archivedDate=a.archivedAt?new Date(a.archivedAt).toLocaleDateString('en-MY',{day:'numeric',month:'short',year:'numeric'}):'—';
+    return`<div class="table-wrap" style="padding:1.25rem">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:4px">${a.semester}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            ${(a.subjects||[]).map(s=>`<span class="badge blue" style="font-family:var(--mono);font-size:10px">${s} — ${a.subjectRegistry&&a.subjectRegistry[s]?a.subjectRegistry[s]:s}</span>`).join('')}
+          </div>
+          <div style="font-size:12px;color:var(--text3)">Archived ${archivedDate} · ${studentCount} students · ${assessCount} assessments · ${quizCount} quizzes</div>
+          ${a.note?`<div style="font-size:12px;color:var(--text2);margin-top:4px;font-style:italic">${a.note}</div>`:''}
+        </div>
+        <button class="btn-sm primary" onclick="openPastSemViewer('${a.id}')">View →</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let _viewingArchive=null;
+let _pastSemTab='gradebook';
+
+function openPastSemViewer(archiveId){
+  _viewingArchive=(DB.semesterArchives||[]).find(a=>a.id===archiveId);
+  if(!_viewingArchive)return;
+  document.getElementById('past-sem-list').style.display='none';
+  document.getElementById('past-sem-viewer').style.display='block';
+  document.getElementById('past-sem-viewer-title').textContent=_viewingArchive.semester;
+  renderPastSemTabs();
+  renderPastSemContent(_pastSemTab='gradebook');
+}
+
+function closePastSemViewer(){
+  _viewingArchive=null;
+  document.getElementById('past-sem-list').style.display='';
+  document.getElementById('past-sem-viewer').style.display='none';
+}
+
+function renderPastSemTabs(){
+  const tabs=[
+    {id:'gradebook',label:'📊 Gradebook'},
+    {id:'students',label:'👥 Students'},
+    {id:'assessments',label:'📋 Assessments'},
+    {id:'attendance',label:'📅 Attendance'},
+    {id:'quizzes',label:'❓ Quizzes'},
+  ];
+  document.getElementById('past-sem-tabs').innerHTML=tabs.map(t=>
+    `<button class="btn-sm ${_pastSemTab===t.id?'primary':''}" onclick="renderPastSemContent('${t.id}')">${t.label}</button>`
+  ).join('');
+}
+
+function renderPastSemContent(tab){
+  _pastSemTab=tab;
+  renderPastSemTabs();
+  const a=_viewingArchive;
+  const content=document.getElementById('past-sem-content');
+  if(!a){content.innerHTML='';return;}
+
+  if(tab==='students'){
+    if(!a.students||!a.students.length){content.innerHTML='<p style="color:var(--text3);padding:1rem">No students in this archive.</p>';return;}
+    content.innerHTML=`<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Matric</th><th>Name</th><th>Subjects</th><th>Group</th></tr></thead><tbody>
+      ${a.students.map(s=>`<tr>
+        <td style="font-family:var(--mono);font-size:12px">${s.matric}</td>
+        <td>${s.name}</td>
+        <td>${(s.subjects||[]).map(c=>`<span class="badge blue" style="font-family:var(--mono);font-size:10px;margin-right:3px">${c}</span>`).join('')}</td>
+        <td>${s.classGroup||'—'}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`;
+  }
+
+  else if(tab==='assessments'){
+    if(!a.assessments||!a.assessments.length){content.innerHTML='<p style="color:var(--text3);padding:1rem">No assessments in this archive.</p>';return;}
+    content.innerHTML=`<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th>Subject</th><th>Name</th><th>Type</th><th>Max Score</th><th>Weight %</th></tr></thead><tbody>
+      ${a.assessments.map(x=>`<tr>
+        <td><span class="badge blue" style="font-family:var(--mono);font-size:10px">${x.subject}</span></td>
+        <td>${x.name}</td><td>${x.type}</td><td>${x.maxScore}</td><td>${x.weight||'—'}</td>
+      </tr>`).join('')}
+    </tbody></table></div>`;
+  }
+
+  else if(tab==='gradebook'){
+    const subjects=a.subjects||[];
+    if(!subjects.length||!a.assessments||!a.students){content.innerHTML='<p style="color:var(--text3);padding:1rem">No gradebook data.</p>';return;}
+    let html='';
+    subjects.forEach(subj=>{
+      const students=a.students.filter(s=>(s.subjects||[]).includes(subj));
+      const assessments=a.assessments.filter(x=>x.subject===subj);
+      const subjName=(a.subjectRegistry&&a.subjectRegistry[subj])||subj;
+      html+=`<div style="margin-bottom:1.5rem">
+        <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">${subj} — ${subjName}</h4>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table"><thead><tr>
+          <th>Matric</th><th>Name</th>
+          ${assessments.map(x=>`<th style="font-size:11px">${x.name}<br><span style="color:var(--text3)">${x.maxScore}m</span></th>`).join('')}
+          <th>Total %</th>
+        </tr></thead><tbody>
+        ${students.map(s=>{
+          const cells=assessments.map(x=>{
+            const sc=a.scores&&a.scores[s.matric]?a.scores[s.matric][x.id]:null;
+            return`<td style="text-align:center">${sc!==null&&sc!==undefined?sc:'—'}</td>`;
+          }).join('');
+          // compute weighted total
+          let totalW=0,totalWt=0;
+          assessments.forEach(x=>{
+            const sc=a.scores&&a.scores[s.matric]?a.scores[s.matric][x.id]:null;
+            if(sc!==null&&sc!==undefined&&x.maxScore>0&&x.weight>0){
+              totalW+=(sc/x.maxScore)*x.weight;
+              totalWt+=x.weight;
+            }
+          });
+          const pct=totalWt>0?Math.round(totalW/totalWt*100):'—';
+          return`<tr><td style="font-family:var(--mono);font-size:11px">${s.matric}</td><td>${s.name}</td>${cells}
+            <td style="text-align:center;font-weight:600">${pct!=='—'?pct+'%':'—'}</td></tr>`;
+        }).join('')}
+        </tbody></table></div></div>`;
+    });
+    content.innerHTML=html||'<p style="color:var(--text3);padding:1rem">No data.</p>';
+  }
+
+  else if(tab==='attendance'){
+    const sessions=a.sessions||[];
+    if(!sessions.length){content.innerHTML='<p style="color:var(--text3);padding:1rem">No attendance sessions in this archive.</p>';return;}
+    const subjects=[...new Set(sessions.map(s=>s.subject))];
+    let html='';
+    subjects.forEach(subj=>{
+      const subjSessions=sessions.filter(s=>s.subject===subj);
+      const students=a.students?a.students.filter(s=>(s.subjects||[]).includes(subj)):[];
+      const subjName=(a.subjectRegistry&&a.subjectRegistry[subj])||subj;
+      html+=`<div style="margin-bottom:1.5rem">
+        <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">${subj} — ${subjName}</h4>
+        <div class="table-wrap" style="overflow-x:auto"><table class="data-table"><thead><tr>
+          <th>Matric</th><th>Name</th>
+          ${subjSessions.map(s=>`<th style="font-size:11px">${s.topic||s.date||'Session'}</th>`).join('')}
+          <th>Rate</th>
+        </tr></thead><tbody>
+        ${students.map(s=>{
+          let present=0;
+          const cells=subjSessions.map(sess=>{
+            const att=sess.attendance&&sess.attendance[s.matric];
+            if(att===true)present++;
+            return`<td style="text-align:center;font-size:12px">${att===true?'✓':att===false?'✗':'—'}</td>`;
+          }).join('');
+          const rate=subjSessions.length>0?Math.round(present/subjSessions.length*100)+'%':'—';
+          return`<tr><td style="font-family:var(--mono);font-size:11px">${s.matric}</td><td>${s.name}</td>${cells}
+            <td style="text-align:center;font-weight:600">${rate}</td></tr>`;
+        }).join('')}
+        </tbody></table></div></div>`;
+    });
+    content.innerHTML=html||'<p style="color:var(--text3);padding:1rem">No data.</p>';
+  }
+
+  else if(tab==='quizzes'){
+    const quizzes=a.QDB&&a.QDB.quizzes?a.QDB.quizzes:[];
+    const subs=a.QDB&&a.QDB.submissions?a.QDB.submissions:[];
+    if(!quizzes.length){content.innerHTML='<p style="color:var(--text3);padding:1rem">No quizzes in this archive.</p>';return;}
+    content.innerHTML=`<div style="display:grid;gap:12px">
+      ${quizzes.map(q=>{
+        const qSubs=subs.filter(s=>s.quizId===q.id);
+        const avg=qSubs.length?Math.round(qSubs.reduce((s,x)=>s+(x.autoScore||0),0)/qSubs.length):null;
+        return`<div class="table-wrap" style="padding:1rem">
+          <div style="font-weight:600;margin-bottom:4px">${q.title}</div>
+          <div style="font-size:12px;color:var(--text2)">${q.subject||''} · ${q.questions?q.questions.length:0} questions · ${qSubs.length} submissions${avg!==null?' · Avg: '+avg+'/'+q.totalMarks:''}</div>
+          ${qSubs.length?`<div style="margin-top:8px"><table class="data-table"><thead><tr><th>Student</th><th>Score</th><th>Submitted</th></tr></thead><tbody>
+            ${qSubs.map(s=>`<tr><td>${s.studentName||s.matric}</td><td>${s.autoScore||0}/${q.totalMarks}</td><td style="font-size:11px;color:var(--text3)">${s.submittedAt?new Date(s.submittedAt).toLocaleString('en-MY'):'—'}</td></tr>`).join('')}
+          </tbody></table></div>`:''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+}
+
+// ── NEW SEMESTER MODAL LOGIC ──────────────────────────────────────────────
+function openNewSemesterModal(){
+  // Pre-fill with suggested next semester
+  const cur=DB.lecturer.currentSemester||'';
+  document.getElementById('new-sem-name').value='';
+  document.getElementById('new-sem-subjects').innerHTML='<div id="new-sem-subj-list" style="display:grid;gap:6px;margin-bottom:8px"></div>';
+  _newSemSubjects=[{code:'',name:''}];
+  renderNewSemSubjectList();
+  document.getElementById('new-sem-note').value='';
+  document.getElementById('new-sem-warning').textContent='This will archive the current semester ('+cur+') and start fresh. All current students, assessments and scores will be moved to the archive.';
+  document.getElementById('modal-new-semester').classList.add('open');
+}
+
+let _newSemSubjects=[];
+
+function renderNewSemSubjectList(){
+  const wrap=document.getElementById('new-sem-subj-list');
+  if(!wrap)return;
+  wrap.innerHTML=_newSemSubjects.map((s,i)=>`
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" placeholder="Code e.g. DCE3053" value="${s.code}" oninput="_newSemSubjects[${i}].code=this.value.toUpperCase()" style="width:140px;padding:7px 10px;border:0.5px solid var(--border);border-radius:var(--radius);font-family:var(--mono);font-size:13px">
+      <input type="text" placeholder="Name e.g. Electrical Circuit Theorem" value="${s.name}" oninput="_newSemSubjects[${i}].name=this.value" style="flex:1;padding:7px 10px;border:0.5px solid var(--border);border-radius:var(--radius);font-size:13px">
+      ${_newSemSubjects.length>1?`<button class="btn-sm danger" style="padding:4px 8px" onclick="_newSemSubjects.splice(${i},1);renderNewSemSubjectList()">✕</button>`:''}
+    </div>`).join('');
+}
+
+function confirmNewSemester(){
+  const newSem=document.getElementById('new-sem-name').value.trim();
+  if(!newSem){toast('Please enter the new semester name');return;}
+  const subjects=_newSemSubjects.filter(s=>s.code.trim());
+  if(!subjects.length){toast('Please add at least one subject');return;}
+  const codes=subjects.map(s=>s.code.trim().toUpperCase());
+  const names=subjects.map(s=>s.name.trim());
+  const note=document.getElementById('new-sem-note').value.trim();
+  const ok=switchToNewSemester(newSem,codes,names);
+  if(ok!==false){
+    closeModal('modal-new-semester');
+    renderAdmin();
+    updateAdminSidebar();
+    refreshAllSubjectDropdowns();
+  }
+}
+
+// ── END SEMESTER ARCHIVE SYSTEM ──────────────────────────────────────────
+
 function renderProfile(){
   updateStorageStatusText();
   if(typeof updateCloudStatusUI==='function')updateCloudStatusUI();
@@ -4956,7 +5311,7 @@ async function cloudSave(){
     const payload={
       DB:getSyncableDB(), // exclude session-only fields — see SESSION_ONLY_FIELDS above
       QDB:{quizzes:QDB.quizzes,submissions:QDB.submissions,students:QDB.students},
-      savedAt:new Date().toISOString() // timestamp so cloudLoad can detect stale pulls
+      savedAt:new Date().toISOString()
     };
     const res=await fetch(url,{
       method:'POST',
@@ -4999,11 +5354,9 @@ async function cloudLoad(showToastOnSuccess){
     }
     const json=await res.json();
     if(!json.success)throw new Error(json.error||'Unknown server error');
+    // Ensure semesterArchives array is always preserved from cloud data
     if(json.data&&json.data.DB){
-      // Staleness guard: if the incoming cloud snapshot is older than what we
-      // already saved locally, skip the apply — we have fresher data. This is
-      // the main defence against a slow cloud push causing a pull to arrive
-      // before the push, rolling back a just-submitted quiz answer.
+      // Staleness guard: skip if cloud data is older than our last local write
       const cloudSavedAt=json.savedAt?new Date(json.savedAt).getTime():0;
       const localSavedAt=_lastLocalWriteAt||0;
       if(cloudSavedAt>0&&localSavedAt>0&&cloudSavedAt<localSavedAt-2000){
@@ -5145,24 +5498,7 @@ function updateCloudStatusUI(){
 
 function manualCloudSync(){
   toast('Syncing…');
-  cloudLoad(true).then(()=>{
-    // Re-render whichever panels are currently visible so new data shows immediately
-    if(DB.currentRole==='admin'){
-      renderDashboardSummary();
-      renderRecentSubs();
-      // Re-render active subject panels
-      getLecturerSubjects().forEach(code=>refreshSubjectPanel(code));
-      // Re-render gradebook if visible
-      if(document.getElementById('admin-gradebook')?.classList.contains('active')){
-        renderGradebook(gradebookSubject||getLecturerSubjects()[0]);
-      }
-      // Re-render quiz submissions if visible
-      if(document.getElementById('admin-quiz')?.classList.contains('active')){
-        renderQuizSubmissions();
-        renderQBDashboard();
-      }
-    }
-  }).catch(()=>{});
+  cloudLoad(true);
 }
 
 // Load any previously saved data BEFORE the rest of the app renders
@@ -5178,8 +5514,7 @@ if(getCloudUrl()){
   setInterval(()=>{
     if(_cloudSyncInFlight||_cloudSaveIsPending||_saveIsPending)return;
     if(typeof currentQuizId!=='undefined'&&currentQuizId&&typeof quizTimer!=='undefined'&&quizTimer)return; // don't pull mid-quiz-attempt
-    // Don't pull during the quiet period after a local write — prevents a cloud pull
-    // from overwriting a fresh submission before it has been pushed up to the sheet.
+    // Don't pull during the quiet period after a local write
     if(Date.now()-_lastLocalWriteAt<CLOUD_PULL_QUIET_MS)return;
     cloudLoad(false);
   },20000);
@@ -5895,10 +6230,7 @@ function submitQuiz(){
     sub._linkedAssessId=linkedAssess.id; // store for later grading
   }
 
-  // Save locally first (instant), then push to cloud immediately — bypass
-  // the debounce so a submission is never lost if the student closes the tab
-  // right after hitting Submit, and so the quiet-period guard has a fresh
-  // _lastLocalWriteAt before the next periodic pull fires.
+  // Save locally first then push to cloud immediately — bypass debounce
   saveAppState();
   cloudSave();
 
