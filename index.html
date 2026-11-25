@@ -5172,6 +5172,7 @@ function saveAppState(){
     };
     localStorage.setItem(EDUTRACK_STORAGE_KEY,JSON.stringify(payload));
     _lastLocalWriteAt=Date.now();
+    localStorage.setItem(_LOCAL_WRITE_TS_KEY,String(_lastLocalWriteAt)); // persist so guard survives page reload
     updateSaveIndicator(true);
   }catch(err){
     console.error('Failed to save EduTrack data to localStorage:',err);
@@ -5299,7 +5300,8 @@ function updateSaveIndicator(success,errMsg){
 // if several changes happen in quick succession.
 let _saveDebounceTimer=null;
 let _saveIsPending=false; // explicit flag — setTimeout IDs stay truthy after firing, so we can't rely on the timer variable alone to know if a save is still pending
-let _lastLocalWriteAt=0; // timestamp of last local save — used to suppress cloud pulls during a quiet period
+const _LOCAL_WRITE_TS_KEY='edutrack_local_write_ts_v1';
+let _lastLocalWriteAt=parseInt(localStorage.getItem(_LOCAL_WRITE_TS_KEY)||'0',10)||0; // persisted across reloads so staleness guard survives sign-out/sign-in
 const CLOUD_PULL_QUIET_MS=30000; // don't pull from cloud for 30 s after any local write
 function autoSave(){
   _saveIsPending=true;
@@ -5440,9 +5442,12 @@ async function cloudLoad(showToastOnSuccess){
     if(!json.success)throw new Error(json.error||'Unknown server error');
     // Ensure semesterArchives array is always preserved from cloud data
     if(json.data&&json.data.DB){
-      // Staleness guard: skip if cloud data is older than our last local write
+      // Staleness guard: skip if cloud data is older than our last local write.
+      // _lastLocalWriteAt is now persisted in localStorage so it survives page reloads.
       const cloudSavedAt=json.savedAt?new Date(json.savedAt).getTime():0;
-      const localSavedAt=_lastLocalWriteAt||0;
+      // Also check the localStorage-persisted timestamp (more reliable across reloads)
+      const persistedLocalTs=parseInt(localStorage.getItem(_LOCAL_WRITE_TS_KEY)||'0',10)||0;
+      const localSavedAt=Math.max(_lastLocalWriteAt||0, persistedLocalTs);
       if(cloudSavedAt>0&&localSavedAt>0&&cloudSavedAt<localSavedAt-2000){
         console.log('EduTrack: skipping stale cloud pull (local:',new Date(localSavedAt).toISOString(),' cloud:',new Date(cloudSavedAt).toISOString(),')');
         _lastCloudSyncAt=new Date();
@@ -6358,11 +6363,20 @@ function saveQuiz(){
   } else {
     QDB.quizzes.push(quiz);
   }
-  toast('Quiz "'+ title +'" saved! ('+totalMarks+' total marks)');
+  saveAppState();
+  toast('💾 Saving "'+title+'" to Google Sheets…');
   clearBuilder();
   showQuizTab('qquizlist', document.querySelector('#quiz-subnav .seg-btn:nth-child(3)'));
-  saveAppState();
-  cloudSave(); // sync immediately (not debounced) since quiz schedule timing matters
+  (async()=>{
+    await cloudSave();
+    setTimeout(()=>{
+      if(_lastCloudSyncError){
+        toast('⚠️ Cloud sync FAILED — data only saved locally! Error: '+_lastCloudSyncError);
+      } else {
+        toast('✅ Quiz "'+title+'" saved & synced to Google Sheets! ('+totalMarks+' marks)');
+      }
+    },1500);
+  })();
 }
 
 function editQuiz(quizId){
