@@ -638,6 +638,14 @@
             </div>
             <div class="text-xs" style="margin-top:8px;color:var(--text2)">Students will only be able to start and submit this quiz between these two times. Leave both blank to make it available immediately with no end date.</div>
           </div>
+          <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:1.25rem">
+            <div class="flex-between mb8">
+              <div><strong style="font-size:13px">🎯 Restrict to Specific Students</strong><div class="text-xs" style="margin-top:2px">Leave blank = all students in this subject can see this quiz</div></div>
+              <span class="badge gray" style="font-size:10px">Optional</span>
+            </div>
+            <textarea id="qb-allowed-matrics" rows="3" placeholder="Enter matric numbers, one per line or comma-separated. E.g.:&#10;D20241112936&#10;D20241112970&#10;D20241114123" style="width:100%;padding:9px 12px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);font-family:var(--font);font-size:12px;color:var(--text);outline:none;resize:vertical;box-sizing:border-box"></textarea>
+            <div class="text-xs" style="margin-top:6px;color:var(--text3)">Only students whose matric number appears here will see this quiz. Useful for Set A / Set B arrangements or makeup tests.</div>
+          </div>
           <div style="background:var(--purple-bg);border:0.5px solid var(--purple-light);border-radius:var(--radius);padding:1rem;margin-bottom:1.25rem">
             <div class="flex-between mb8">
               <div><strong style="font-size:13px">AI Question Extractor</strong><div class="text-xs" style="margin-top:2px">Upload a PDF — Claude will extract questions automatically</div></div>
@@ -4912,7 +4920,15 @@ function renderStudentQuizHome(){
   }
   document.getElementById('sq-heading').textContent='My Quizzes — '+subj;
   document.getElementById('sq-subj-tag').textContent='Quizzes for '+getSubjectName(subj);
-  const quizzes=QDB.quizzes.filter(q=>q.subject===subj&&q.status==='published');
+  const myMatric=DB.currentStudent;
+  const quizzes=QDB.quizzes.filter(q=>{
+    if(q.subject!==subj||q.status!=='published')return false;
+    // If allowedMatrics is set, only show to students in that list
+    if(q.allowedMatrics&&q.allowedMatrics.length>0){
+      return q.allowedMatrics.includes(myMatric);
+    }
+    return true; // no restriction — visible to all
+  });
   if(!quizzes.length){document.getElementById('student-quiz-list').innerHTML='<p class="text-sm" style="padding:1rem">No quizzes available yet.</p>';return;}
   document.getElementById('student-quiz-list').innerHTML=quizzes.map(q=>{
     const sub=QDB.submissions.find(s=>s.quizId===q.id&&s.matric===DB.currentStudent);
@@ -5673,6 +5689,7 @@ function quizCardHTML(q,subCount,avg){
           <span class="text-xs">${q.totalMarks} marks</span>
           <span class="text-xs">${q.duration} min</span>
           <span class="text-xs">${mcqCount} MCQ · ${strCount} Structure</span>
+          ${q.allowedMatrics&&q.allowedMatrics.length?`<span class="badge amber" title="Restricted to: ${q.allowedMatrics.join(', ')}">🎯 ${q.allowedMatrics.length} students assigned</span>`:'<span class="badge gray" style="font-size:10px">All students</span>'}
           ${avg!==null?`<span class="badge green">Avg: ${avg}%</span>`:''}
           <span class="badge gray">${subCount} submitted</span>
         </div>
@@ -5892,6 +5909,7 @@ function clearBuilder(){
   const d=document.getElementById('qb-duration');if(d)d.value=30;
   const oa=document.getElementById('qb-opens-at');if(oa)oa.value='';
   const ca=document.getElementById('qb-closes-at');if(ca)ca.value='';
+  const am=document.getElementById('qb-allowed-matrics');if(am)am.value='';
   const banner=document.getElementById('qb-editing-banner');
   if(banner)banner.style.display='none';
 }
@@ -6317,6 +6335,10 @@ function saveQuiz(){
     }
   }
 
+  // Parse allowed matrics — split by newline or comma, trim, remove blanks
+  const allowedRaw=document.getElementById('qb-allowed-matrics').value||'';
+  const allowedMatrics=allowedRaw.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
+
   const quiz={
     id:targetId||('q'+(Date.now())),
     subject,
@@ -6325,6 +6347,7 @@ function saveQuiz(){
     duration:parseInt(document.getElementById('qb-duration').value)||30,
     opensAt,   // ISO datetime string or null = available immediately
     closesAt,  // ISO datetime string or null = no end date
+    allowedMatrics: allowedMatrics.length>0 ? allowedMatrics : null, // null = no restriction
     status:'published',
     createdAt:new Date().toISOString().split('T')[0],
     questions:[...builderQuestions]
@@ -6356,6 +6379,7 @@ function editQuiz(quizId){
   const qbDur=document.getElementById('qb-duration');if(qbDur)qbDur.value=q.duration;
   const qbOpens=document.getElementById('qb-opens-at');if(qbOpens)qbOpens.value=q.opensAt||'';
   const qbCloses=document.getElementById('qb-closes-at');if(qbCloses)qbCloses.value=q.closesAt||'';
+  const qbAllowed=document.getElementById('qb-allowed-matrics');if(qbAllowed)qbAllowed.value=q.allowedMatrics&&q.allowedMatrics.length?q.allowedMatrics.join('\n'):'';
   showQuizTab('qbuilder', document.querySelector('#quiz-subnav .seg-btn:nth-child(2)'));
   renderBuilder();
   toast('Editing: '+q.title);
