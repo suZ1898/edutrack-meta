@@ -1859,26 +1859,51 @@ function doLogin(){
   const pw=document.getElementById('login-pw').value.trim().toUpperCase();
   const errEl=document.getElementById('login-err');
   errEl.style.display='none';
-  const st=DB.students.find(s=>s.matric===id);
-  if(!st){
+
+  // Try login with current local data first
+  const tryLogin=()=>{
+    const st=DB.students.find(s=>s.matric===id);
+    if(!st)return false;
+    if(!st.subjects.includes(pw)){
+      errEl.textContent='Subject code "'+pw+'" is not enrolled for this student. Enrolled: '+(st.subjects.join(', ')||'none');
+      errEl.style.display='block';
+      return true; // found student but wrong subject — no retry needed
+    }
+    DB.currentRole='student';
+    DB.currentStudent=st.matric;
+    DB.activeSubject=pw;
+    showPage('student');
+    if(getCloudUrl()){
+      cloudLoad(false).then(()=>renderStudent()).catch(()=>renderStudent());
+    } else {
+      renderStudent();
+    }
+    return true;
+  };
+
+  // First attempt with local data
+  if(tryLogin())return;
+
+  // ID not found locally — maybe cloud hasn't loaded yet (slow internet on first visit)
+  // Show "fetching..." and retry after pulling from cloud
+  if(getCloudUrl()){
+    errEl.textContent='⏳ Fetching latest data... please wait.';
+    errEl.style.display='block';
+    errEl.style.color='var(--accent,#7c3aed)';
+    cloudLoad(false).then(()=>{
+      errEl.style.color='';
+      if(!tryLogin()){
+        errEl.textContent='Matric number "'+id+'" not found. Please check and try again.';
+        errEl.style.display='block';
+      }
+    }).catch(()=>{
+      errEl.style.color='';
+      errEl.textContent='Matric number "'+id+'" not found. Please check and try again.';
+      errEl.style.display='block';
+    });
+  } else {
     errEl.textContent='Matric number "'+id+'" not found. Please check and try again.';
     errEl.style.display='block';
-    return;
-  }
-  if(!st.subjects.includes(pw)){
-    errEl.textContent='Subject code "'+pw+'" is not enrolled for this student. Enrolled: '+(st.subjects.join(', ')||'none');
-    errEl.style.display='block';
-    return;
-  }
-  DB.currentRole='student';
-  DB.currentStudent=st.matric;
-  DB.activeSubject=pw;
-  showPage('student');
-  // Pull latest cloud data so student sees most recent scores/quiz results
-  if(getCloudUrl()){
-    cloudLoad(false).then(()=>renderStudent()).catch(()=>renderStudent());
-  } else {
-    renderStudent();
   }
 }
 
