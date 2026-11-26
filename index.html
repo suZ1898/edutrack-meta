@@ -5323,28 +5323,29 @@ async function cloudLoad(showToastOnSuccess){
       // Also check the localStorage-persisted timestamp (more reliable across reloads)
       const persistedLocalTs=parseInt(localStorage.getItem(_LOCAL_WRITE_TS_KEY)||'0',10)||0;
       const localSavedAt=Math.max(_lastLocalWriteAt||0, persistedLocalTs);
-      if(cloudSavedAt>0&&localSavedAt>0&&cloudSavedAt<localSavedAt-2000){
-        console.log('EduTrack: skipping stale cloud pull (local:',new Date(localSavedAt).toISOString(),' cloud:',new Date(cloudSavedAt).toISOString(),')');
-        _lastCloudSyncAt=new Date();
-        _lastCloudSyncError=null;
-        updateCloudStatusUI();
-        if(showToastOnSuccess)toast('✓ Sync checked — local data is already up to date');
-        return true;
+      // Staleness guard: if local is newer than cloud, skip DB overwrite BUT still
+      // pull quiz settings — lecturer may have changed opening/closing time on another device.
+      const isStale=cloudSavedAt>0&&localSavedAt>0&&cloudSavedAt<localSavedAt-2000;
+      if(isStale){
+        console.log('EduTrack: local newer than cloud — skipping DB overwrite but will still refresh quiz settings (local:',new Date(localSavedAt).toISOString(),' cloud:',new Date(cloudSavedAt).toISOString(),')');
+      } else {
+        // Preserve THIS browser's current session identity — never let incoming
+        // shared data overwrite who's currently logged in here.
+        const preservedSession={};
+        SESSION_ONLY_FIELDS.forEach(f=>{preservedSession[f]=DB[f];});
+        Object.assign(DB,json.data.DB);
+        Object.assign(DB,preservedSession);
       }
-      // Preserve THIS browser's current session identity — never let incoming
-      // shared data overwrite who's currently logged in here.
-      const preservedSession={};
-      SESSION_ONLY_FIELDS.forEach(f=>{preservedSession[f]=DB[f];});
-      Object.assign(DB,json.data.DB);
-      Object.assign(DB,preservedSession);
     }
     if(json.data&&json.data.QDB){
       // Smart merge for quizzes: cloud empty array should NEVER wipe out local quizzes.
       // Only replace if cloud actually has quizzes, OR local also has none.
+      // NOTE: quiz settings (openAt, closeAt, isActive) are ALWAYS taken from cloud
+      // even when local is newer — lecturer controls these from another device.
       const cloudQuizzes=json.data.QDB.quizzes;
       const cloudSubs=json.data.QDB.submissions;
       if(Array.isArray(cloudQuizzes)&&cloudQuizzes.length>0){
-        // Cloud has real quizzes — use them (they're the shared truth)
+        // Cloud has real quizzes — always use them (lecturer's shared truth)
         QDB.quizzes=cloudQuizzes;
       } else if(Array.isArray(cloudQuizzes)&&cloudQuizzes.length===0&&QDB.quizzes&&QDB.quizzes.length>0){
         // Cloud says quizzes=[] but we have local quizzes — cloud is BEHIND us.
@@ -5353,13 +5354,14 @@ async function cloudLoad(showToastOnSuccess){
         setTimeout(()=>cloudSave(),500);
       }
       // Submissions: always take the longer/more-complete array
+      // (student may have submitted locally while offline)
       if(Array.isArray(cloudSubs)){
         if(cloudSubs.length>=QDB.submissions.length){
           QDB.submissions=cloudSubs;
         } else if(cloudSubs.length>0&&QDB.submissions.length===0){
           QDB.submissions=cloudSubs;
         }
-        // If local has MORE submissions (student just submitted offline) — keep local
+        // If local has MORE submissions (student just submitted) — keep local
       }
       if(json.data.QDB.students)QDB.students=json.data.QDB.students;
     }
