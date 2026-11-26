@@ -677,6 +677,11 @@
 
         <!-- ALL QUIZZES -->
         <div id="qtab-qquizlist" class="qtab" style="display:none">
+          <!-- Cloud sync status banner -->
+          <div id="qlist-sync-banner" style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 12px;margin-bottom:12px;font-size:12px;gap:8px">
+            <span id="qlist-sync-status" style="color:var(--text2)">⏳ Checking sync status…</span>
+            <button onclick="forceSyncQuizzes(this)" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap">🔄 Force Sync Now</button>
+          </div>
           <div class="seg">
             <button class="seg-btn active" onclick="filterQuizList('',this)">All</button>
             <button class="seg-btn" onclick="filterQuizList('DCE3043',this)">DCE3043</button>
@@ -5563,6 +5568,7 @@ function updateCloudStatusUI(){
     if(urlInput)urlInput.value='';
     if(connectBtn)connectBtn.style.display='inline-flex';
     if(disconnectBtn)disconnectBtn.style.display='none';
+    _updateQlistSyncBanner(false,null,'Not connected to Google Sheets');
     return;
   }
 
@@ -5573,15 +5579,54 @@ function updateCloudStatusUI(){
   if(_lastCloudSyncError){
     statusEl.innerHTML='⚠️ <strong>Connected, but last sync failed:</strong> '+_lastCloudSyncError;
     statusEl.style.color='var(--red)';
+    _updateQlistSyncBanner(false,null,'❌ Last sync FAILED: '+_lastCloudSyncError);
   } else if(_lastCloudSyncAt){
     const sourceNote=isBakedIn
       ?'This connection is built into the file — every student who opens it connects automatically too.'
       :'This connection is only saved in this browser — see the note below to make it automatic for students.';
     statusEl.innerHTML='🟢 <strong>Connected to shared storage.</strong> Last synced: '+_lastCloudSyncAt.toLocaleTimeString()+'. '+sourceNote;
     statusEl.style.color='var(--green)';
+    _updateQlistSyncBanner(true,_lastCloudSyncAt,'✅ Synced to Google Sheets at '+_lastCloudSyncAt.toLocaleTimeString()+' — HP/tablet will get latest data');
   } else {
     statusEl.innerHTML='🟢 <strong>Connected to shared storage.</strong> Syncing…';
     statusEl.style.color='var(--green)';
+    _updateQlistSyncBanner(null,null,'⏳ Syncing to Google Sheets…');
+  }
+}
+
+function _updateQlistSyncBanner(success,ts,msg){
+  const el=document.getElementById('qlist-sync-status');
+  const banner=document.getElementById('qlist-sync-banner');
+  if(!el)return;
+  el.textContent=msg||'';
+  if(banner){
+    if(success===true)banner.style.background='var(--green-bg)';
+    else if(success===false)banner.style.background='var(--red-bg)';
+    else banner.style.background='var(--bg3)';
+  }
+}
+
+async function forceSyncQuizzes(btn){
+  if(btn){btn.disabled=true;btn.textContent='Syncing…';}
+  const bannerEl=document.getElementById('qlist-sync-status');
+  if(bannerEl)bannerEl.textContent='⏳ Sending all quiz data to Google Sheets…';
+  try{
+    await cloudSave();
+    if(_lastCloudSyncError){
+      if(bannerEl)bannerEl.textContent='❌ Sync FAILED: '+_lastCloudSyncError+'. Try again or check GAS URL in My Profile.';
+      const b=document.getElementById('qlist-sync-banner');if(b)b.style.background='var(--red-bg)';
+      toast('❌ Sync failed: '+_lastCloudSyncError);
+    } else {
+      const t=new Date().toLocaleTimeString();
+      if(bannerEl)bannerEl.textContent='✅ Synced to Google Sheets at '+t+' — HP/tablet will show latest quizzes';
+      const b=document.getElementById('qlist-sync-banner');if(b)b.style.background='var(--green-bg)';
+      toast('✅ All quiz data synced to Google Sheets! HP/tablet will now show latest.');
+    }
+  }catch(e){
+    if(bannerEl)bannerEl.textContent='❌ Sync error: '+e.message;
+    toast('❌ Sync error: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='🔄 Force Sync Now';}
   }
 }
 
