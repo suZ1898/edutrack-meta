@@ -680,7 +680,10 @@
           <!-- Cloud sync status banner -->
           <div id="qlist-sync-banner" style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:0.5px solid var(--border);border-radius:var(--radius);padding:8px 12px;margin-bottom:12px;font-size:12px;gap:8px">
             <span id="qlist-sync-status" style="color:var(--text2)">⏳ Checking sync status…</span>
-            <button onclick="forceSyncQuizzes(this)" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap">🔄 Force Sync Now</button>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button onclick="diagCloudQuizzes()" style="background:var(--bg2);color:var(--text2);border:0.5px solid var(--border);border-radius:6px;padding:5px 10px;font-size:11px;font-family:var(--font);cursor:pointer;white-space:nowrap">🔍 Check Cloud</button>
+              <button onclick="forceSyncQuizzes(this)" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-family:var(--font);cursor:pointer;white-space:nowrap">🔄 Force Sync Now</button>
+            </div>
           </div>
           <div class="seg">
             <button class="seg-btn active" onclick="filterQuizList('',this)">All</button>
@@ -5314,8 +5317,28 @@ async function cloudLoad(showToastOnSuccess){
       Object.assign(DB,preservedSession);
     }
     if(json.data&&json.data.QDB){
-      if(json.data.QDB.quizzes)QDB.quizzes=json.data.QDB.quizzes;
-      if(json.data.QDB.submissions)QDB.submissions=json.data.QDB.submissions;
+      // Smart merge for quizzes: cloud empty array should NEVER wipe out local quizzes.
+      // Only replace if cloud actually has quizzes, OR local also has none.
+      const cloudQuizzes=json.data.QDB.quizzes;
+      const cloudSubs=json.data.QDB.submissions;
+      if(Array.isArray(cloudQuizzes)&&cloudQuizzes.length>0){
+        // Cloud has real quizzes — use them (they're the shared truth)
+        QDB.quizzes=cloudQuizzes;
+      } else if(Array.isArray(cloudQuizzes)&&cloudQuizzes.length===0&&QDB.quizzes&&QDB.quizzes.length>0){
+        // Cloud says quizzes=[] but we have local quizzes — cloud is BEHIND us.
+        // Don't wipe local. Push our data back up immediately so cloud catches up.
+        console.warn('EduTrack: cloud has 0 quizzes but local has '+QDB.quizzes.length+' — cloud data is stale. Pushing local back to cloud…');
+        setTimeout(()=>cloudSave(),500);
+      }
+      // Submissions: always take the longer/more-complete array
+      if(Array.isArray(cloudSubs)){
+        if(cloudSubs.length>=QDB.submissions.length){
+          QDB.submissions=cloudSubs;
+        } else if(cloudSubs.length>0&&QDB.submissions.length===0){
+          QDB.submissions=cloudSubs;
+        }
+        // If local has MORE submissions (student just submitted offline) — keep local
+      }
       if(json.data.QDB.students)QDB.students=json.data.QDB.students;
     }
     _lastCloudSyncAt=new Date();
@@ -5454,7 +5477,7 @@ function _updateQlistSyncBanner(success,ts,msg){
 async function forceSyncQuizzes(btn){
   if(btn){btn.disabled=true;btn.textContent='Syncing…';}
   const bannerEl=document.getElementById('qlist-sync-status');
-  if(bannerEl)bannerEl.textContent='⏳ Sending all quiz data to Google Sheets…';
+  if(bannerEl)bannerEl.textContent='⏳ Sending all quiz data ('+QDB.quizzes.length+' quizzes) to Google Sheets…';
   try{
     await cloudSave();
     if(_lastCloudSyncError){
@@ -5463,15 +5486,36 @@ async function forceSyncQuizzes(btn){
       toast('❌ Sync failed: '+_lastCloudSyncError);
     } else {
       const t=new Date().toLocaleTimeString();
-      if(bannerEl)bannerEl.textContent='✅ Synced to Google Sheets at '+t+' — HP/tablet will show latest quizzes';
+      if(bannerEl)bannerEl.textContent='✅ Synced '+QDB.quizzes.length+' quizzes to Google Sheets at '+t+' — HP/tablet will show latest quizzes';
       const b=document.getElementById('qlist-sync-banner');if(b)b.style.background='var(--green-bg)';
-      toast('✅ All quiz data synced to Google Sheets! HP/tablet will now show latest.');
+      toast('✅ '+QDB.quizzes.length+' quiz(zes) synced to Google Sheets! HP/tablet will now show latest.');
     }
   }catch(e){
     if(bannerEl)bannerEl.textContent='❌ Sync error: '+e.message;
     toast('❌ Sync error: '+e.message);
   }finally{
     if(btn){btn.disabled=false;btn.textContent='🔄 Force Sync Now';}
+  }
+}
+
+async function diagCloudQuizzes(){
+  // Diagnostic: fetch raw cloud data and show quiz count
+  const url=getCloudUrl();
+  if(!url){toast('No cloud URL configured');return;}
+  toast('Checking cloud data…');
+  try{
+    const res=await fetch(url+(url.includes('?')?'&':'?')+'action=load',{method:'GET',redirect:'follow',cache:'no-store'});
+    const json=await res.json();
+    if(!json.success){toast('Cloud error: '+(json.error||'unknown'));return;}
+    const cloudQ=json.data&&json.data.QDB&&json.data.QDB.quizzes?json.data.QDB.quizzes:[];
+    const cloudS=json.data&&json.data.QDB&&json.data.QDB.submissions?json.data.QDB.submissions:[];
+    const savedAt=json.savedAt?new Date(json.savedAt).toLocaleString('ms-MY'):'(tiada)';
+    const msg='☁️ Cloud data:\n• '+cloudQ.length+' quizzes\n• '+cloudS.length+' submissions\n• Saved at: '+savedAt+
+      '\n\n📱 Local data (this browser):\n• '+QDB.quizzes.length+' quizzes\n• '+QDB.submissions.length+' submissions';
+    alert(msg);
+    console.log('EduTrack cloud diagnostic:',{cloudQuizzes:cloudQ,cloudSubmissions:cloudS,savedAt:json.savedAt});
+  }catch(e){
+    toast('Diagnostic error: '+e.message);
   }
 }
 
