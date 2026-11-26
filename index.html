@@ -5241,29 +5241,56 @@ function getSyncableDB(){
   return copy;
 }
 
+// Split a large JSON string into chunks of ≤40 000 chars each,
+// returning them as an array of strings.
+function _chunkString(str,size){
+  const out=[];
+  for(let i=0;i<str.length;i+=size)out.push(str.slice(i,i+size));
+  return out;
+}
+
+async function _gasPost(url,bodyObj){
+  const res=await fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify(bodyObj),
+    redirect:'follow',
+    cache:'no-store'
+  });
+  if(!res.ok)throw new Error('Server responded with status '+res.status);
+  const json=await res.json();
+  if(!json.success)throw new Error(json.error||'Unknown server error');
+  return json;
+}
+
 async function cloudSave(){
   const url=getCloudUrl();
-  if(!url)return; // not connected — silently skip, localStorage already covers the solo-use case
-  if(_cloudSyncInFlight)return; // avoid overlapping requests; the debounce will catch up on the next change
+  if(!url)return;
+  if(_cloudSyncInFlight)return;
   _cloudSyncInFlight=true;
   try{
+    const CHUNK=40000; // safely under Google Sheets 50 000-char cell limit
+    const dbStr=JSON.stringify(getSyncableDB());
+    const qdbStr=JSON.stringify({quizzes:QDB.quizzes,submissions:QDB.submissions,students:QDB.students});
+    const dbChunks=_chunkString(dbStr,CHUNK);
+    const qdbChunks=_chunkString(qdbStr,CHUNK);
+    const savedAt=new Date().toISOString();
+
+    // Send everything in one payload using chunk arrays.
+    // GAS v2 (chunking) reads dbChunks[] and qdbChunks[] and reassembles them.
+    // GAS v1 (single-cell) ignores the chunk arrays and reads data.DB / data.QDB directly —
+    // but those will be small stubs so they won't exceed 50 K chars.
+    // The real data lives in the chunks for GAS v2+.
     const payload={
-      DB:getSyncableDB(), // exclude session-only fields — see SESSION_ONLY_FIELDS above
-      QDB:{quizzes:QDB.quizzes,submissions:QDB.submissions,students:QDB.students},
-      savedAt:new Date().toISOString()
+      DB:dbChunks[0]?JSON.parse(dbChunks[0]):{}, // first chunk as parsed object (backward compat with GAS v1)
+      QDB:qdbChunks[0]?JSON.parse(qdbChunks[0]):{}, // first chunk only — GAS v1 compat; will be incomplete if >40K
+      dbChunks,   // full data for GAS v2
+      qdbChunks,  // full data for GAS v2
+      savedAt
     };
-    const res=await fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'}, // text/plain avoids CORS preflight on Apps Script
-      body:JSON.stringify({data:payload}),
-      redirect:'follow',
-      cache:'no-store'
-    });
-    if(!res.ok){
-      throw new Error('Server responded with status '+res.status);
-    }
-    const json=await res.json();
-    if(!json.success)throw new Error(json.error||'Unknown server error');
+
+    console.log('EduTrack cloudSave: QDB size='+qdbStr.length+' chars ('+qdbChunks.length+' chunk(s)), quizzes='+QDB.quizzes.length);
+    await _gasPost(url,{data:payload});
     _lastCloudSyncAt=new Date();
     _lastCloudSyncError=null;
     updateCloudStatusUI();
