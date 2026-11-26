@@ -5276,16 +5276,11 @@ async function cloudSave(){
     const qdbChunks=_chunkString(qdbStr,CHUNK);
     const savedAt=new Date().toISOString();
 
-    // Send everything in one payload using chunk arrays.
-    // GAS v2 (chunking) reads dbChunks[] and qdbChunks[] and reassembles them.
-    // GAS v1 (single-cell) ignores the chunk arrays and reads data.DB / data.QDB directly —
-    // but those will be small stubs so they won't exceed 50 K chars.
-    // The real data lives in the chunks for GAS v2+.
+    // Send chunk arrays — GAS v2 joins them back and saves each chunk in a separate cell.
+    // We do NOT parse chunks here (parsing a partial JSON string causes "Unterminated string" errors).
     const payload={
-      DB:dbChunks[0]?JSON.parse(dbChunks[0]):{}, // first chunk as parsed object (backward compat with GAS v1)
-      QDB:qdbChunks[0]?JSON.parse(qdbChunks[0]):{}, // first chunk only — GAS v1 compat; will be incomplete if >40K
-      dbChunks,   // full data for GAS v2
-      qdbChunks,  // full data for GAS v2
+      dbChunks,   // array of raw strings — GAS joins & parses server-side
+      qdbChunks,  // array of raw strings — GAS joins & parses server-side
       savedAt
     };
 
